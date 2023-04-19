@@ -16,7 +16,9 @@ from tqdm import tqdm
 import wandb
 from wandb.keras import WandbMetricsLogger, WandbModelCheckpoint
 import json
-
+import pandas as pd
+import imagesize
+import re
 physical_devices = tf.config.list_physical_devices("GPU")
 try:
     tf.config.experimental.set_memory_growth(physical_devices[0], True)
@@ -24,7 +26,7 @@ except:
     # Invalid device or cannot modify virtual devices once initialized.
     pass
 
-BATCH_SIZE = 32
+BATCH_SIZE = 4
 EPOCHS = 100
 CLASSES = 20
 
@@ -41,188 +43,158 @@ def _parse_image_function(example_proto):
     # Parse the input tf.train.Example proto using the dictionary above.
     return tf.io.parse_single_example(example_proto, image_feature_description)
 
-def toPercentage(img_orig, x1,x2,y1,y2):
-    h,w,c = np.shape(img_orig)
+
+def toPercentage(dimx, dimy, x1, x2, y1, y2):
+    h, w, c = dimx, dimy, 3
     x1p = x1 / w
     x2p = x2 / w
     y1p = y1 / h
     y2p = y2 / h
     return x1p, x2p, y1p, y2p
 
-def toImCoord(img_resized, x1p,x2p,y1p,y2p):
-    h,w,c = np.shape(img_resized)
+
+def toImCoord(x1p, x2p, y1p, y2p):
+    h, w, c = 224, 224, 3
     x1 = x1p * w
     x2 = x2p * w
     y1 = y1p * h
-    y2 = y2p * h        
+    y2 = y2p * h
     return x1, x2, y1, y2
-
 
 
 def load_data(data_type: ty.AnyStr):
     tfrecords = glob.glob(f"F:/ObjectDetection_FromScratch/data/{data_type}/*tfrecords")
-    normalization_layer = tf.keras.layers.Rescaling(1.0 / 255)
 
-    Y = []
-    img = np.zeros(((len(tfrecords), 224, 224, 3)))
 
-    if not os.path.exists(
-        f"F:/ObjectDetection_FromScratch/data/Pascal VOC 2012.v1-raw.tensorflow_processed/{data_type}/"
-    ):
-        os.makedirs(
-            f"F:/ObjectDetection_FromScratch/data/Pascal VOC 2012.v1-raw.tensorflow_processed/{data_type}"
+    dict_data = {}
+    for _, sample in enumerate(tqdm(tfrecords)):
+        raw_image_dataset = tf.data.TFRecordDataset(sample)
+        img_filename = sample.split("\\")[-1].split("_.tfrecords")[0]
+
+        # Create a dictionary describing the features.
+        parsed_image_dataset = raw_image_dataset.map(_parse_image_function)
+        for image_features in parsed_image_dataset:
+            raw_xmin, raw_xmax, raw_ymin, raw_ymax = (
+                float(image_features["xmin"]),
+                float(image_features["xmax"]),
+                float(image_features["ymin"]),
+                float(image_features["ymax"]),
+            )
+            label = image_features["label"]
+
+        x, y = imagesize.get(f"F:/ObjectDetection_FromScratch/data/Pascal VOC 2012.v1-raw.tensorflow/{data_type}/{img_filename}")
+        
+        # recalculating the coordinates after resizing the image
+        xminp, xmaxp, yminp, ymaxp = toPercentage(
+            x, y, raw_xmin, raw_xmax, raw_ymin, raw_ymax
         )
-        new_coords = {}
-        for idx, sample in enumerate(tqdm(tfrecords)):
-            raw_image_dataset = tf.data.TFRecordDataset(sample)
-            img_filename = sample.split("\\")[-1].split("_.tfrecords")[0]
+        xmin, xmax, ymin, ymax = toImCoord(xminp, xmaxp, yminp, ymaxp)
 
-            image = tf.keras.utils.load_img(
-                f"F:/ObjectDetection_FromScratch/data/Pascal VOC 2012.v1-raw.tensorflow/{data_type}/"
-                + img_filename,
-                target_size=(224, 224),
-            )
-            image = tf.keras.utils.img_to_array(image)
-            image = normalization_layer(image)
-            tf.keras.utils.save_img(
-                f"F:/ObjectDetection_FromScratch/data/Pascal VOC 2012.v1-raw.tensorflow_processed/{data_type}/{img_filename}",
-                image,
-                data_format="channels_last",
-            )
+        box = [xmin, xmax, ymin, ymax]
+        box = np.asarray(box, dtype=np.float32)
 
-            img[idx, :, :] = image
-            # Create a dictionary describing the features.
-            parsed_image_dataset = raw_image_dataset.map(_parse_image_function)
-            for image_features in parsed_image_dataset:
-                raw_xmin, raw_xmax, raw_ymin, raw_ymax = (
-                    image_features["xmin"],
-                    image_features["xmax"],
-                    image_features["ymin"],
-                    image_features["ymax"],
-                )
-                label = image_features["label"]
+        dict_data[img_filename] = {'label': label, 'xmin': xmin, 'xmax': xmax, 'ymin': ymin, 'ymax':ymax}
 
-            raw_img = cv2.imread(f"F:/ObjectDetection_FromScratch/data/Pascal VOC 2012.v1-raw.tensorflow/{data_type}/{img_filename}")
+        df = pd.DataFrame().from_dict(dict_data, orient='index')
+        df.to_csv(f"F:/ObjectDetection_FromScratch/data/{data_type}.csv")
+    return df
 
-            # recalculating the coordinates after resizing the image
-            xminp, xmaxp, yminp, ymaxp = toPercentage(raw_img, raw_xmin, raw_xmax, raw_ymin, raw_ymax)
-            xmin, xmax, ymin, ymax = toImCoord(image, xminp, xmaxp, yminp, ymaxp)
+def adapt(generator):
+    def new_generator():
+        for img, (label, xmin, xmax, ymin, ymax) in generator:
+            x = img
+            y = {
+                'reg': np.stack([xmin, xmax, ymin, ymax], axis=1),
+                'cls': np.eye(20)[label]
 
+            }
+            yield x, y
+        return new_generator
+            
 
-            # saving the new coordinates in the first run
-            new_coords[img_filename] = [xmin, xmax, ymin, ymax]
+def compile_model(model, optimizer=tf.keras.optimizers.Adam(), lr: float = 1e-4):
+    optimizer=optimizer(lr)
+    losses = {
+        'cls': tf.keras.losses.CategoricalCrossentropy(),
+        'reg': tf.keras.losses.MeanSquaredError(),
+    }
 
-            box = [xmin, xmax, ymin, ymax]
-            box = np.asarray(box, dtype=float)
-            labels = np.append(box, label)
+    metrics = {
+        'cls': tf.keras.metrics.Accuracy(),
+        'reg': tf.keras.metrics.IoU(),
+    }
 
-            Y.append(labels)
+    model.compie(optimizer, losses, metrics)
 
-        with open(f"F:/ObjectDetection_FromScratch/data/annotations/new_coords.json", "w") as pbfile:
-            json.dump(new_coords, pbfile)
-
-        img_tensor = tf.convert_to_tensor(img, dtype=tf.float32)
-        labels_tensor = tf.convert_to_tensor(Y, dtype=tf.float32)
-        result = tf.data.Dataset.from_tensor_slices((img_tensor, labels_tensor))
-
-    else:
-        Y = []
-        # Opening JSON file
-        f = open('F:/ObjectDetection_FromScratch/data/annotations/new_coords.json')
-        # returns JSON object as  a dictionary
-        json_coords = json.load(f)
-
-        for idx, sample in enumerate(tqdm(tfrecords)):
-            raw_image_dataset = tf.data.TFRecordDataset(sample)
-            img_filename = sample.split("\\")[-1].split("_.tfrecords")[0]
-
-            image = tf.keras.utils.load_img(
-                f"F:/ObjectDetection_FromScratch/data/Pascal VOC 2012.v1-raw.tensorflow_processed/{data_type}/"
-                + img_filename,
-                target_size=(224, 224),
-            )
-
-            img[idx, :, :] = image
-            # Create a dictionary describing the features.
-            parsed_image_dataset = raw_image_dataset.map(_parse_image_function)
-
-            for image_features in parsed_image_dataset:
-                label = image_features["label"]
-
-            box = json_coords[img_filename]
-            box = np.asarray(box, dtype=float)
-
-            labels = np.append(box, label)
-            Y.append(labels)
-
-
-        img_tensor = tf.convert_to_tensor(img, dtype=tf.float32)
-        labels_tensor = tf.convert_to_tensor(Y, dtype=tf.float32)
-        result = tf.data.Dataset.from_tensor_slices((img_tensor, labels_tensor))
-
-    return result
-
-
-def format_instance(image, label):
-    return image, (
-        tf.one_hot(int(label[4]), CLASSES),
-        [label[0], label[1], label[2], label[3]],
-    )
-
-
-def tune_training_ds(dataset):
-    dataset = dataset.map(format_instance, num_parallel_calls=tf.data.AUTOTUNE)
-    dataset = dataset.shuffle(1024, reshuffle_each_iteration=True)
-    dataset = dataset.repeat()  # The dataset be repeated indefinitely.
-    dataset = dataset.batch(BATCH_SIZE)
-    dataset = dataset.prefetch(tf.data.AUTOTUNE)
-    return dataset
-
-
-def tune_validation_ds(dataset):
-    dataset = dataset.map(format_instance, num_parallel_calls=tf.data.AUTOTUNE)
-    dataset = dataset.batch(len(dataset) // 4)
-    dataset = dataset.repeat()
-    return dataset
+    return model
 
 
 def main():
-    raw_train_ds = load_data("train")
-    raw_valid_ds = load_data("valid")
+    if not os.path.exists('F:/ObjectDetection_FromScratch/data/train.csv') and not os.path.exists('F:/ObjectDetection_FromScratch/data/valid.csv'):
+        df_train = load_data('train')
+        df_valid = load_data('valid')
 
-    train_ds = tune_training_ds(raw_train_ds)
-    valid_ds = tune_validation_ds(raw_valid_ds)
+    elif not os.path.exists('F:/ObjectDetection_FromScratch/data/train.csv') and os.path.exists('F:/ObjectDetection_FromScratch/data/valid.csv'):
+        df_train = load_data('train')
 
-    model = ObjectDetection(tf.keras.layers.Input(shape=(224, 224, 3)))
+    elif os.path.exists('F:/ObjectDetection_FromScratch/data/train.csv') and not os.path.exists('F:/ObjectDetection_FromScratch/data/valid.csv'):
+        df_valid = load_data('valid')
+
+    else:
+        df_train = pd.read_csv('F:/ObjectDetection_FromScratch/data/train.csv')
+        df_valid = pd.read_csv('F:/ObjectDetection_FromScratch/data/valid.csv')
+
+
+    image_data_gen_args = dict(
+        target_size =(224, 224),
+        batch_size = BATCH_SIZE,
+        class_mode = 'multi_output',
+        x_col = 'filename',
+        y_col = ['label', 'xmin', 'xmax', 'ymin', 'ymax']
+    )
+
+    train_gen = tf.keras.preprocessing.image.ImageDataGenerator(
+        rescale=1/255.
+    ).flow_from_dataframe(df_train, directory='F:/ObjectDetection_FromScratch/data/train', **image_data_gen_args)
+
+    valid_gen = tf.keras.preprocessing.image.ImageDataGenerator(
+        rescale=1/255.
+    ).flow_from_dataframe(df_valid, directory='F:/ObjectDetection_FromScratch/data/valid', **image_data_gen_args)
+
+    output_signature = (
+        tf.TensorShape(shape = (None, 224, 224, 3)),
+
+        {
+            'cls': tf.TensorShape(shape=(None, 20), dtype = tf.int32),
+            'reg': tf.TensorShape(shape=(None, 4), dtype = tf.float32)
+
+        }
+    )
+
+    train_ds = tf.data.Dataset.from_generator(
+        adapt(train_gen),
+        output_signature=output_signature
+    )
+    valid_ds = tf.data.Dataset.from_generator(
+        adapt(valid_gen),
+        output_signature=output_signature
+    )
+
+
+    model = ObjectDetection()
 
     wandb.init(
         # set the wandb project where this run will be logged
         project="objectDetection",
         # track hyperparameters and run metadata with wandb.config
-        config={
-            "classifier_head_loss": "categorical_crossentropy",
-            "regressor_head_loss": "mse",
-            "classifier_head_metric": "accuracy",
-            "regressor_head_metric": "mse",
-        },
-    )
-    config = wandb.config
+        #     
+         )
 
-    model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5),
-        loss={
-            "classifier_head": config.classifier_head_loss,
-            "regressor_head": config.regressor_head_loss,
-        },
-        metrics={
-            "classifier_head": config.classifier_head_metric,
-            "regressor_head": config.regressor_head_metric,
-        },
-    )
+    model = compile_model(model)
 
     history = model.fit(
         train_ds,
-        steps_per_epoch=(len(raw_train_ds) // BATCH_SIZE),
+        steps_per_epoch=(len(num_filest_train) // BATCH_SIZE),
         validation_data=valid_ds,
         validation_steps=1,
         epochs=EPOCHS,
@@ -234,6 +206,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-# model.fit(X_train, [y_train,y_train_class], epochs=150, batch_size=32, verbose=2)
