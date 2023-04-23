@@ -18,7 +18,9 @@ from wandb.keras import WandbMetricsLogger, WandbModelCheckpoint
 import json
 import pandas as pd
 import imagesize
+from sklearn import preprocessing
 import re
+
 physical_devices = tf.config.list_physical_devices("GPU")
 try:
     tf.config.experimental.set_memory_growth(physical_devices[0], True)
@@ -29,20 +31,9 @@ except:
 BATCH_SIZE = 4
 EPOCHS = 100
 CLASSES = 20
-
-
-def _parse_image_function(example_proto):
-    image_feature_description = {
-        "xmin": tf.io.FixedLenFeature([], tf.int64),
-        "xmax": tf.io.FixedLenFeature([], tf.int64),
-        "ymin": tf.io.FixedLenFeature([], tf.int64),
-        "ymax": tf.io.FixedLenFeature([], tf.int64),
-        "label": tf.io.FixedLenFeature([], tf.int64),
-    }
-
-    # Parse the input tf.train.Example proto using the dictionary above.
-    return tf.io.parse_single_example(example_proto, image_feature_description)
-
+IMG_DIR = 'F:/ObjectDetection_FromScratch/data/Pascal VOC 2012.v1-raw.tensorflow/'
+NUM_CLASSES = pd.read_csv('F:/ObjectDetection_FromScratch/data/annotations/train_annotations.csv')
+NUM_CLASSES = len(NUM_CLASSES['class'].unique())
 
 def toPercentage(dimx, dimy, x1, x2, y1, y2):
     h, w, c = dimx, dimy, 3
@@ -62,139 +53,117 @@ def toImCoord(x1p, x2p, y1p, y2p):
     return x1, x2, y1, y2
 
 
-def load_data(data_type: ty.AnyStr):
-    tfrecords = glob.glob(f"F:/ObjectDetection_FromScratch/data/{data_type}/*tfrecords")
+def load_data(data_type: ty.AnyStr = None, le:preprocessing.LabelEncoder = None):
 
+    df = pd.read_csv(f'F:/ObjectDetection_FromScratch/data/annotations/{data_type}_annotations.csv')
+    df['filename'] = df['filename'].apply(lambda x: IMG_DIR + data_type + '/' + x)
+    
 
-    dict_data = {}
-    for _, sample in enumerate(tqdm(tfrecords)):
-        raw_image_dataset = tf.data.TFRecordDataset(sample)
-        img_filename = sample.split("\\")[-1].split("_.tfrecords")[0]
-
-        # Create a dictionary describing the features.
-        parsed_image_dataset = raw_image_dataset.map(_parse_image_function)
-        for image_features in parsed_image_dataset:
-            raw_xmin, raw_xmax, raw_ymin, raw_ymax = (
-                float(image_features["xmin"]),
-                float(image_features["xmax"]),
-                float(image_features["ymin"]),
-                float(image_features["ymax"]),
-            )
-            label = image_features["label"]
-
-        x, y = imagesize.get(f"F:/ObjectDetection_FromScratch/data/Pascal VOC 2012.v1-raw.tensorflow/{data_type}/{img_filename}")
-        
+    for _, row in df.iterrows():
         # recalculating the coordinates after resizing the image
         xminp, xmaxp, yminp, ymaxp = toPercentage(
-            x, y, raw_xmin, raw_xmax, raw_ymin, raw_ymax
-        )
+            row['width'], row['height'], row['xmin'], row['xmax'], row['ymin'], row['ymax'])
         xmin, xmax, ymin, ymax = toImCoord(xminp, xmaxp, yminp, ymaxp)
 
-        box = [xmin, xmax, ymin, ymax]
-        box = np.asarray(box, dtype=np.float32)
+        row['xmin'], row['xmax'], row['ymin'], row['ymax'] = xmin, xmax, ymin, ymax
+    if data_type == 'train':
+        le = preprocessing.LabelEncoder()
+        le.fit(df['class'].values)
+        df['class'] = le.transform(df['class'])
+    else:
+        df['class'] = le.transform(df['class'])
 
-        dict_data[img_filename] = {'label': label, 'xmin': xmin, 'xmax': xmax, 'ymin': ymin, 'ymax':ymax}
 
-        df = pd.DataFrame().from_dict(dict_data, orient='index')
-        df.to_csv(f"F:/ObjectDetection_FromScratch/data/{data_type}.csv")
-    return df
+    df.drop(columns=['width', 'height'], inplace=True)
+    df.rename(columns={'class': 'label'}, inplace=True)
+
+    return df, le
+
 
 def adapt(generator):
     def new_generator():
         for img, (label, xmin, xmax, ymin, ymax) in generator:
             x = img
             y = {
-                'reg': np.stack([xmin, xmax, ymin, ymax], axis=1),
-                'cls': np.eye(20)[label]
-
+                "cls": np.eye(NUM_CLASSES)[label],
+                "reg": np.stack([xmin, xmax, ymin, ymax], axis=1),
             }
             yield x, y
-        return new_generator
-            
+    return new_generator
 
-def compile_model(model, optimizer=tf.keras.optimizers.Adam(), lr: float = 1e-4):
-    optimizer=optimizer(lr)
+
+def compile_model(model, lr: float = 1e-4):
+    optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
     losses = {
-        'cls': tf.keras.losses.CategoricalCrossentropy(),
-        'reg': tf.keras.losses.MeanSquaredError(),
+        "cls": tf.keras.losses.CategoricalCrossentropy(),
+        "reg": tf.keras.losses.MeanSquaredError(),
     }
 
     metrics = {
-        'cls': tf.keras.metrics.Accuracy(),
-        'reg': tf.keras.metrics.IoU(),
+        "cls": tf.keras.metrics.Accuracy(),
+        "reg": tf.keras.metrics.MeanSquaredError(),
     }
 
-    model.compie(optimizer, losses, metrics)
+    model.compile(optimizer, losses, metrics)
 
     return model
 
 
 def main():
-    if not os.path.exists('F:/ObjectDetection_FromScratch/data/train.csv') and not os.path.exists('F:/ObjectDetection_FromScratch/data/valid.csv'):
-        df_train = load_data('train')
-        df_valid = load_data('valid')
 
-    elif not os.path.exists('F:/ObjectDetection_FromScratch/data/train.csv') and os.path.exists('F:/ObjectDetection_FromScratch/data/valid.csv'):
-        df_train = load_data('train')
-
-    elif os.path.exists('F:/ObjectDetection_FromScratch/data/train.csv') and not os.path.exists('F:/ObjectDetection_FromScratch/data/valid.csv'):
-        df_valid = load_data('valid')
-
-    else:
-        df_train = pd.read_csv('F:/ObjectDetection_FromScratch/data/train.csv')
-        df_valid = pd.read_csv('F:/ObjectDetection_FromScratch/data/valid.csv')
-
+    df_train, transformer = load_data('train')
+    df_valid, _ = load_data('valid', transformer)
 
     image_data_gen_args = dict(
-        target_size =(224, 224),
-        batch_size = BATCH_SIZE,
-        class_mode = 'multi_output',
-        x_col = 'filename',
-        y_col = ['label', 'xmin', 'xmax', 'ymin', 'ymax']
+        target_size=(224, 224),
+        batch_size=BATCH_SIZE,
+        class_mode="multi_output",
+        x_col="filename",
+        y_col=["label", "xmin", "xmax", "ymin", "ymax"],
     )
 
     train_gen = tf.keras.preprocessing.image.ImageDataGenerator(
-        rescale=1/255.
-    ).flow_from_dataframe(df_train, directory='F:/ObjectDetection_FromScratch/data/train', **image_data_gen_args)
+        rescale=1 / 255.0
+    ).flow_from_dataframe(
+        df_train,
+        directory="F:/ObjectDetection_FromScratch/data/train",
+        **image_data_gen_args,
+    )
 
     valid_gen = tf.keras.preprocessing.image.ImageDataGenerator(
-        rescale=1/255.
-    ).flow_from_dataframe(df_valid, directory='F:/ObjectDetection_FromScratch/data/valid', **image_data_gen_args)
+        rescale=1 / 255.0
+    ).flow_from_dataframe(
+        df_valid,
+        directory="F:/ObjectDetection_FromScratch/data/valid",
+        **image_data_gen_args,
+    )
 
     output_signature = (
-        tf.TensorShape(shape = (None, 224, 224, 3)),
-
+        tf.TensorSpec(shape=(None, 224, 224, 3)),
         {
-            'cls': tf.TensorShape(shape=(None, 20), dtype = tf.int32),
-            'reg': tf.TensorShape(shape=(None, 4), dtype = tf.float32)
-
-        }
+            "cls": tf.TensorSpec(shape=(None, NUM_CLASSES), dtype=tf.int32),
+            "reg": tf.TensorSpec(shape=(None, 4), dtype=tf.float32),
+        },
     )
 
     train_ds = tf.data.Dataset.from_generator(
-        adapt(train_gen),
-        output_signature=output_signature
+        adapt(train_gen), output_signature=output_signature
     )
     valid_ds = tf.data.Dataset.from_generator(
-        adapt(valid_gen),
-        output_signature=output_signature
+        adapt(valid_gen), output_signature=output_signature
     )
 
-
     model = ObjectDetection()
+    model = compile_model(model)
 
     wandb.init(
         # set the wandb project where this run will be logged
         project="objectDetection",
-        # track hyperparameters and run metadata with wandb.config
-        #     
-         )
-
-    model = compile_model(model)
+    )
 
     history = model.fit(
         train_ds,
-        steps_per_epoch=(len(num_filest_train) // BATCH_SIZE),
+        steps_per_epoch=(len(df_train) // BATCH_SIZE),
         validation_data=valid_ds,
         validation_steps=1,
         epochs=EPOCHS,

@@ -30,7 +30,7 @@ def csv_to_label(input_dir: Ty.AnyStr, output_dir: Ty.AnyStr):
     dict_labels = {}
     for idx, labels in enumerate(unique_labels):
 
-        dict_labels[labels] = idx+1
+        dict_labels[labels] = idx
 
     # generating the string to be saved in pbtxt format
 
