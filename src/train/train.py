@@ -20,6 +20,7 @@ import pandas as pd
 import imagesize
 from sklearn import preprocessing
 import re
+from tensorflow.keras import backend as K
 
 physical_devices = tf.config.list_physical_devices("GPU")
 try:
@@ -28,7 +29,7 @@ except:
     # Invalid device or cannot modify virtual devices once initialized.
     pass
 
-BATCH_SIZE = 4
+BATCH_SIZE = 8
 EPOCHS = 100
 CLASSES = 20
 IMG_DIR = 'F:/ObjectDetection_FromScratch/data/Pascal VOC 2012.v1-raw.tensorflow/'
@@ -92,6 +93,26 @@ def adapt(generator):
     return new_generator
 
 
+def f1_score(y_true, y_pred):    
+    def recall_m(y_true, y_pred):
+        TP = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+        Positives = K.sum(K.round(K.clip(y_true, 0, 1)))
+        
+        recall = TP / (Positives+K.epsilon())    
+        return recall 
+    
+    
+    def precision_m(y_true, y_pred):
+        TP = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+        Pred_Positives = K.sum(K.round(K.clip(y_pred, 0, 1)))
+    
+        precision = TP / (Pred_Positives+K.epsilon())
+        return precision 
+    
+    precision, recall = precision_m(y_true, y_pred), recall_m(y_true, y_pred)
+    
+    return 2*((precision*recall)/(precision+recall+K.epsilon()))
+
 def compile_model(model, lr: float = 1e-4):
     optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
     losses = {
@@ -100,7 +121,7 @@ def compile_model(model, lr: float = 1e-4):
     }
 
     metrics = {
-        "cls": tf.keras.metrics.Accuracy(),
+        "cls": f1_score,
         "reg": tf.keras.metrics.MeanSquaredError(),
     }
 
@@ -146,12 +167,29 @@ def main():
         },
     )
 
+    
     train_ds = tf.data.Dataset.from_generator(
         adapt(train_gen), output_signature=output_signature
     )
     valid_ds = tf.data.Dataset.from_generator(
         adapt(valid_gen), output_signature=output_signature
     )
+
+
+    for img, (label, xmin, xmax, ymin, ymax) in valid_gen:
+        print("Image shape: ")
+        print(img.shape, '\n')
+
+        print("Labels to classification: ")
+        print(label, '\n')
+
+        print("Regression: ")
+        print("X[0]: ", xmin)
+        print("X[1]: ", xmax)
+        print("Y[0]: ", ymin)
+        print("Y[1]: ", ymax)
+        break
+
 
     model = ObjectDetection()
     model = compile_model(model)
