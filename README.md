@@ -10,3 +10,6 @@ It was based on pre-trained models from tensorflow connected to a Multi-Layer Pe
 The training script it is located at: [src/train/train.py](src/train/train.py)
 
 The architecture it is located at: [src/cnn/architecture.py](src/cnn/architecture.py)
+
+
+If you want to reproduce the study, please, download the dataset, and submit the CSVs with the annotations inside [data/annotations](data/annotations) named  [train_annotations](data/annotations/train_annotations.csv) and [valid_annotations](data/annotations/valid_annotations.csv), the folder with the images inside [data/](data/) named [Pascal VOC 2012.v1-raw.tensorflow](data/Pascal VOC 2012.v1-raw.tensorflow) 
