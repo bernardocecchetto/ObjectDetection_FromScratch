@@ -1,0 +1,57 @@
+albumentations==1.3.0
+brotlipy==0.7.0
+certifi @ file:///C:/b/abs_85o_6fm0se/croot/certifi_1671487778835/work/certifi
+cffi @ file:///C:/b/abs_49n3v2hyhr/croot/cffi_1670423218144/work
+charset-normalizer @ file:///tmp/build/80754af9/charset-normalizer_1630003229654/work
+contourpy==1.0.7
+cryptography @ file:///C:/b/abs_8ecplyc3n2/croot/cryptography_1677533105000/work
+cycler==0.11.0
+Cython==0.29.34
+filelock @ file:///C:/b/abs_c7yrhs9uz2/croot/filelock_1672387617533/work
+fonttools==4.39.3
+idna @ file:///C:/b/abs_bdhbebrioa/croot/idna_1666125572046/work
+imageio==2.28.1
+importlib-resources==5.12.0
+Jinja2 @ file:///C:/b/abs_7cdis66kl9/croot/jinja2_1666908141852/work
+joblib==1.2.0
+kiwisolver==1.4.4
+lazy_loader==0.2
+MarkupSafe @ file:///C:/ci/markupsafe_1654508077284/work
+matplotlib==3.7.1
+mkl-fft==1.3.1
+mkl-random @ file:///C:/ci/mkl_random_1626186184308/work
+mkl-service==2.4.0
+mpmath==1.2.1
+networkx @ file:///C:/b/abs_b935xy_9g6/croot/networkx_1678964342510/work
+numpy @ file:///C:/b/abs_54abayvc9j/croot/numpy_and_numpy_base_1682520598361/work
+opencv-python==4.7.0.72
+opencv-python-headless==4.7.0.72
+packaging==23.1
+pandas==2.0.1
+Pillow==9.4.0
+pycocotools @ git+https://github.com/gautamchitnis/cocoapi.git@20291f19c46a8d11935862bc9e449a1b72ec25ed#subdirectory=PythonAPI
+pycparser @ file:///tmp/build/80754af9/pycparser_1636541352034/work
+pyOpenSSL @ file:///C:/b/abs_552w85x1jz/croot/pyopenssl_1677607703691/work
+pyparsing==3.0.9
+PySocks @ file:///C:/ci/pysocks_1605307512533/work
+python-dateutil==2.8.2
+pytz==2023.3
+PyWavelets==1.4.1
+PyYAML==6.0
+qudida==0.0.4
+requests @ file:///C:/b/abs_41owkd5ymz/croot/requests_1682607524657/work
+scikit-image==0.20.0
+scikit-learn==1.2.2
+scipy==1.9.1
+six @ file:///tmp/build/80754af9/six_1644875935023/work
+sympy @ file:///C:/b/abs_95fbf1z7n6/croot/sympy_1668202411612/work
+threadpoolctl==3.1.0
+tifffile==2023.4.12
+torch==2.0.0
+torchaudio==2.0.0
+torchvision==0.15.0
+typing_extensions @ file:///C:/b/abs_a1bb332wcs/croot/typing_extensions_1681939523095/work
+tzdata==2023.3
+urllib3 @ file:///C:/b/abs_3ce53vrdcr/croot/urllib3_1680254693505/work
+win-inet-pton @ file:///C:/ci/win_inet_pton_1605306162074/work
+zipp==3.15.0

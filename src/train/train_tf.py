@@ -4,7 +4,7 @@ from tensorflow.keras.utils import Sequence
 import sys
 
 sys.path.append(".")
-from src.cnn.architecture import ObjectDetection
+from src.cnn.architecture_tf import ObjectDetection
 import glob
 import numpy as np
 from PIL import Image

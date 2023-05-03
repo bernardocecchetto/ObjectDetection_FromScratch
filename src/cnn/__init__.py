@@ -1,1 +1,1 @@
-from .architecture import ObjectDetection
+from .architecture_tf import ObjectDetection
