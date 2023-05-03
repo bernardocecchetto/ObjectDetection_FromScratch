@@ -9,6 +9,7 @@ import torch.utils.data
 from PIL import Image
 import cv2 as cv2
 import pandas as pd
+import wandb
 
 # torchvision libraries
 import torch
@@ -74,7 +75,6 @@ class PascalVOCDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         img_name = self.imgs[idx]
-        print(img_name)
         image_path = os.path.join(self.files_dir, img_name)
         # reading the images and converting them to correct size and color
         img = cv2.imread(image_path)
@@ -102,10 +102,10 @@ class PascalVOCDataset(torch.utils.data.Dataset):
             xmax = int(row["xmax"])
             ymin = int(row["ymin"])
             ymax = int(row["ymax"])
-            xmin_corr = (xmin / wt) * self.width
-            xmax_corr = (xmax / wt) * self.width
-            ymin_corr = (ymin / ht) * self.height
-            ymax_corr = (ymax / ht) * self.height
+            xmin_corr = xmin / wt
+            xmax_corr = xmax / wt
+            ymin_corr = ymin / ht
+            ymax_corr = ymax / ht
             boxes.append([xmin_corr, ymin_corr, xmax_corr, ymax_corr])
 
         # convert boxes into a torch.Tensor
@@ -182,7 +182,7 @@ def main():
 
     # use our dataset and defined transformations
     dataset = PascalVOCDataset(
-        files_dir, 480, 480, "train", transforms=get_transform(train=True)
+        files_dir, 480, 480, "train", transforms=get_transform(train=False)
     )
     dataset_valid = PascalVOCDataset(
         valid_dir, 480, 480, "valid", transforms=get_transform(train=False)
@@ -230,13 +230,6 @@ def main():
         lr_scheduler.step()
         # evaluate on the test dataset
         evaluate(model, data_loader_valid, device=device)
-
-    # wandb.init(
-    #     # set the wandb project where this run will be logged
-    #     project="objectDetection",
-    # )
-
-    # wandb.finish()
 
 
 if __name__ == "__main__":

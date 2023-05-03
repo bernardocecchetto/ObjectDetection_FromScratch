@@ -2,7 +2,7 @@ import math
 import sys
 import time
 import torch
-
+import wandb
 import torchvision.models.detection.mask_rcnn
 
 from src.pytorch_functions.coco_utils import get_coco_api_from_dataset
@@ -11,7 +11,6 @@ import src.pytorch_functions.utils as utils
 
 
 def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq):
-    model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter("lr", utils.SmoothedValue(window_size=1, fmt="{value:.6f}"))
     header = "Epoch: [{}]".format(epoch)
@@ -28,7 +27,6 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq):
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
         loss_dict = model(images, targets)
-
         losses = sum(loss for loss in loss_dict.values())
 
         # reduce losses over all GPUs for logging purposes
