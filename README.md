@@ -6,11 +6,11 @@ The following study it was developed using the PASCAL VOC Dataset (https://publi
 
 It was based on pre-trained models from tensorflow connected to a Multi-Layer Perceptron, which has two outputs: a regression head (to predict the coordinates) and a classification head (to predict which class if the specific object located).
 
-
 The training script it is located at: [src/train/train.py](src/train/train.py)
 
 The architecture it is located at: [src/cnn/architecture.py](src/cnn/architecture.py)
 
+I also fine-tuned a R-CNN ResNet50 pre-trained in COCO dataset using Pytorch. You can find it in [src/train/train_pytorch.py](src/train/train_pytorch.py)
 
 If you want to reproduce the study, please, download the dataset, and submit the CSVs with the annotations inside [data/annotations](data/annotations) named  [train_annotations](data/annotations/train_annotations.csv) and [valid_annotations](data/annotations/valid_annotations.csv), the folder with the images inside [data/](data/) named Pascal VOC 2012.v1-raw.tensorflow.
 
