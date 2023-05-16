@@ -5,6 +5,7 @@ sys.path.append(".")
 import os
 import numpy as np
 import torch
+import logging
 import torch.utils.data
 from PIL import Image
 import cv2 as cv2
@@ -107,6 +108,13 @@ class PascalVOCDataset(torch.utils.data.Dataset):
             xmax = int(row["xmax"])
             ymin = int(row["ymin"])
             ymax = int(row["ymax"])
+
+            if xmax > wt:
+                logging.info("xmax is bigger than width. Fixing...")
+                xmax = wt
+            if ymax > ht:
+                logging.info("ymax is bigger than heidth. Fixing...")
+                ymax = ht
 
             # new coordinates after resizing
             xmin = int((xmin / wt) * self.width)
@@ -228,12 +236,12 @@ def main():
 
     # define training and validation data loaders
     data_loader = torch.utils.data.DataLoader(
-        dataset, batch_size=5, shuffle=True, num_workers=10, collate_fn=collate_fn
+        dataset, batch_size=10, shuffle=True, num_workers=10, collate_fn=collate_fn
     )
 
     data_loader_valid = torch.utils.data.DataLoader(
         dataset_valid,
-        batch_size=5,
+        batch_size=10,
         shuffle=False,
         num_workers=10,
         collate_fn=collate_fn,
