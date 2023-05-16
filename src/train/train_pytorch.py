@@ -10,29 +10,34 @@ from PIL import Image
 import cv2 as cv2
 import pandas as pd
 import wandb
+from PIL import Image
+import albumentations as A
 
 # torchvision libraries
 import torch
 import torchvision
+
+
 from torchvision import transforms as torchtrans
 from torchvision.models.detection.faster_rcnn import (
     FastRCNNPredictor,
-    FasterRCNN_ResNet50_FPN_Weights,
 )
 import albumentations as A
+from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 from albumentations.pytorch.transforms import ToTensorV2
-
 
 from src.pytorch_functions import train_one_epoch, evaluate, collate_fn
 
+torch.cuda.empty_cache()
+
 
 class PascalVOCDataset(torch.utils.data.Dataset):
-    def __init__(self, files_dir, width, height, type, transforms=None):
+    def __init__(self, files_dir, type, width, height, transforms=None):
         self.transforms = transforms
         self.files_dir = files_dir
-        self.height = height
-        self.width = width
         self.type = type
+        self.width = width
+        self.height = height
 
         # sorting the images for consistency
         # annotation file
@@ -76,23 +81,23 @@ class PascalVOCDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         img_name = self.imgs[idx]
         image_path = os.path.join(self.files_dir, img_name)
-        # reading the images and converting them to correct size and color
+
         img = cv2.imread(image_path)
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32)
         img_res = cv2.resize(img_rgb, (self.width, self.height), cv2.INTER_AREA)
-
         # diving by 255
         img_res /= 255.0
+
         df_img = self.df_annot[self.df_annot.filename == img_name]
 
         boxes = []
         labels = []
         num_objs = len(df_img)
-
+        # mask_list = []
         for idx, row in df_img.iterrows():
             # cv2 image gives size as height x width
-            wt = img.shape[1]
-            ht = img.shape[0]
+            wt = img_rgb.shape[1]
+            ht = img_rgb.shape[0]
 
             # box coordinates for xml files are extracted and corrected for image size given
             labels.append(self.classes.index(row["class"]))
@@ -102,29 +107,46 @@ class PascalVOCDataset(torch.utils.data.Dataset):
             xmax = int(row["xmax"])
             ymin = int(row["ymin"])
             ymax = int(row["ymax"])
-            xmin_corr = xmin / wt
-            xmax_corr = xmax / wt
-            ymin_corr = ymin / ht
-            ymax_corr = ymax / ht
-            boxes.append([xmin_corr, ymin_corr, xmax_corr, ymax_corr])
+
+            # new coordinates after resizing
+            xmin = int((xmin / wt) * self.width)
+            xmax = int((xmax / wt) * self.width)
+            ymin = int((ymin / ht) * self.height)
+            ymax = int((ymax / ht) * self.height)
+
+            # creating the mask
+            # mask = np.zeros(img_array.shape[:2], dtype="uint8")
+            # cv2.rectangle(mask, (xmin, xmax), (ymin, ymax), 255, -1)
+            # # masked = cv2.bitwise_and(img_array, img_array, mask=mask)
+            # mask_list.append(mask)
+            boxes.append([xmin, ymin, xmax, ymax])
+            # display the mask, and the output image
+            # cv2.imshow("Mask", mask)
+            # cv2.waitKey(0)
+            # cv2.imshow("Masked Image", masked)
+            # cv2.waitKey(0)
+            # cv2.destroyAllWindows()
 
         # convert boxes into a torch.Tensor
         boxes = torch.as_tensor(boxes, dtype=torch.float32)
         area = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])
+        # mask_array = np.array(mask_list)
+        # masks = torch.as_tensor(mask_array, dtype=torch.uint8)
+
+        image_id = torch.tensor([idx])
+
         # suppose all instances are not crowd
         iscrowd = torch.zeros(num_objs, dtype=torch.int64)
 
         labels = torch.as_tensor(labels, dtype=torch.int64)
-        target = {}
 
+        target = {}
         target["boxes"] = boxes
         target["labels"] = labels
+        # target["masks"] = masks
+        target["image_id"] = image_id
         target["area"] = area
         target["iscrowd"] = iscrowd
-
-        # image_id
-        image_id = torch.tensor([idx])
-        target["image_id"] = image_id
 
         if self.transforms:
             sample = self.transforms(
@@ -133,6 +155,7 @@ class PascalVOCDataset(torch.utils.data.Dataset):
 
             img_res = sample["image"]
             target["boxes"] = torch.Tensor(sample["bboxes"])
+
         return img_res, target
 
     def __len__(self):
@@ -140,20 +163,26 @@ class PascalVOCDataset(torch.utils.data.Dataset):
 
 
 def get_object_detection_model(num_classes):
-    # load a model pre-trained pre-trained on COCO
-    model = torchvision.models.detection.fasterrcnn_resnet50_fpn(
-        weights=FasterRCNN_ResNet50_FPN_Weights.DEFAULT
-    )
+    # load an instance segmentation model pre-trained on COCO
+    model = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights="DEFAULT")
 
     # get number of input features for the classifier
     in_features = model.roi_heads.box_predictor.cls_score.in_features
+
     # replace the pre-trained head with a new one
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
+
+    # # now get the number of input features for the mask classifier
+    # in_features_mask = model.roi_heads.mask_predictor.conv5_mask.in_channels
+    # hidden_layer = 256
+    # # and replace the mask predictor with a new one
+    # model.roi_heads.mask_predictor = MaskRCNNPredictor(
+    #     in_features_mask, hidden_layer, num_classes
+    # )
 
     return model
 
 
-# Send train=True fro training transforms and False for val/test transforms
 def get_transform(train):
     if train:
         return A.Compose(
@@ -171,6 +200,15 @@ def get_transform(train):
         )
 
 
+# def get_transform(train):
+#     transforms = []
+#     transforms.append(PILToTensor())
+#     transforms.append(ConvertImageDtype(torch.float))
+#     if train:
+#         transforms.append(RandomHorizontalFlip(0.5))
+#     return Compose(transforms)
+
+
 def main():
     # defining the files directory and testing directory
     files_dir = (
@@ -180,24 +218,24 @@ def main():
         "F:/ObjectDetection_FromScratch/data/Pascal VOC 2012.v1-raw.tensorflow/valid"
     )
 
-    # use our dataset and defined transformations
+    # use our dataset and defined transformss
     dataset = PascalVOCDataset(
-        files_dir, 480, 480, "train", transforms=get_transform(train=False)
+        files_dir, "train", width=448, height=448, transforms=get_transform(train=False)
     )
     dataset_valid = PascalVOCDataset(
-        valid_dir, 480, 480, "valid", transforms=get_transform(train=False)
+        valid_dir, "valid", width=448, height=448, transforms=get_transform(train=False)
     )
 
     # define training and validation data loaders
     data_loader = torch.utils.data.DataLoader(
-        dataset, batch_size=10, shuffle=True, num_workers=4, collate_fn=collate_fn
+        dataset, batch_size=5, shuffle=True, num_workers=10, collate_fn=collate_fn
     )
 
     data_loader_valid = torch.utils.data.DataLoader(
         dataset_valid,
-        batch_size=10,
+        batch_size=5,
         shuffle=False,
-        num_workers=4,
+        num_workers=10,
         collate_fn=collate_fn,
     )
 
@@ -225,7 +263,7 @@ def main():
 
     for epoch in range(num_epochs):
         # training for one epoch
-        train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq=10)
+        train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq=5)
         # update the learning rate
         lr_scheduler.step()
         # evaluate on the test dataset
