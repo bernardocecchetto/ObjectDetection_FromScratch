@@ -122,25 +122,11 @@ class PascalVOCDataset(torch.utils.data.Dataset):
             ymin = int((ymin / ht) * self.height)
             ymax = int((ymax / ht) * self.height)
 
-            # creating the mask
-            # mask = np.zeros(img_array.shape[:2], dtype="uint8")
-            # cv2.rectangle(mask, (xmin, xmax), (ymin, ymax), 255, -1)
-            # # masked = cv2.bitwise_and(img_array, img_array, mask=mask)
-            # mask_list.append(mask)
             boxes.append([xmin, ymin, xmax, ymax])
-            # display the mask, and the output image
-            # cv2.imshow("Mask", mask)
-            # cv2.waitKey(0)
-            # cv2.imshow("Masked Image", masked)
-            # cv2.waitKey(0)
-            # cv2.destroyAllWindows()
 
         # convert boxes into a torch.Tensor
         boxes = torch.as_tensor(boxes, dtype=torch.float32)
         area = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])
-        # mask_array = np.array(mask_list)
-        # masks = torch.as_tensor(mask_array, dtype=torch.uint8)
-
         image_id = torch.tensor([idx])
 
         # suppose all instances are not crowd
@@ -151,7 +137,6 @@ class PascalVOCDataset(torch.utils.data.Dataset):
         target = {}
         target["boxes"] = boxes
         target["labels"] = labels
-        # target["masks"] = masks
         target["image_id"] = image_id
         target["area"] = area
         target["iscrowd"] = iscrowd
@@ -179,15 +164,6 @@ def get_object_detection_model(num_classes):
 
     # replace the pre-trained head with a new one
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
-
-    # # now get the number of input features for the mask classifier
-    # in_features_mask = model.roi_heads.mask_predictor.conv5_mask.in_channels
-    # hidden_layer = 256
-    # # and replace the mask predictor with a new one
-    # model.roi_heads.mask_predictor = MaskRCNNPredictor(
-    #     in_features_mask, hidden_layer, num_classes
-    # )
-
     return model
 
 
@@ -206,15 +182,6 @@ def get_transform(train):
             [ToTensorV2(p=1.0)],
             bbox_params={"format": "pascal_voc", "label_fields": ["labels"]},
         )
-
-
-# def get_transform(train):
-#     transforms = []
-#     transforms.append(PILToTensor())
-#     transforms.append(ConvertImageDtype(torch.float))
-#     if train:
-#         transforms.append(RandomHorizontalFlip(0.5))
-#     return Compose(transforms)
 
 
 def main():
